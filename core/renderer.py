@@ -11,8 +11,15 @@ from mdit_py_plugins.dollarmath import dollarmath_plugin
 _md = MarkdownIt("default", {"html": True, "linkify": False, "typographer": True, "breaks": True})
 _md.use(dollarmath_plugin)
 
-REMOVE_TAGS = {"meta", "title", "head", "link"}
+# 需要移除的标签：文档元数据 + 活跃内容（脚本/插件/表单/CSS 注入，防 XSS）
+REMOVE_TAGS = {
+    "meta", "title", "head", "link", "style",
+    "script", "iframe", "object", "embed", "base", "form",
+}
 UNWRAP_TAGS = {"html", "body"}
+
+_EVENT_ATTR_RE = re.compile(r"^on[a-z]+$", re.I)
+_UNSAFE_URL_RE = re.compile(r"^\s*(javascript|vbscript|data:text/html)\s*:", re.I)
 
 
 def _templates_dir() -> Path:
@@ -73,6 +80,17 @@ def _sanitize(dom: BeautifulSoup) -> BeautifulSoup:
     for tag_name in UNWRAP_TAGS:
         for tag in dom.find_all(tag_name):
             tag.unwrap()
+    # 移除事件属性（onclick / onerror / onload 等），防事件型 XSS
+    for tag in dom.find_all(True):
+        for attr in list(tag.attrs):
+            if _EVENT_ATTR_RE.match(attr):
+                del tag.attrs[attr]
+    # 拦截 javascript: / vbscript: / data:text/html 危险 URL（href / src / xlink:href）
+    for tag in dom.find_all(True):
+        for attr in ("href", "src", "xlink:href"):
+            val = tag.attrs.get(attr)
+            if isinstance(val, str) and _UNSAFE_URL_RE.match(val):
+                del tag.attrs[attr]
     return dom
 
 
@@ -122,7 +140,7 @@ MERMAID_CSS = (
 
 MERMAID_SCRIPT = (
     '<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"'
-    ' onload="mermaid.initialize({startOnLoad:false,theme:\'default\',securityLevel:\'loose\'});'
+    ' onload="mermaid.initialize({startOnLoad:false,theme:\'default\',securityLevel:\'strict\'});'
     "mermaid.run({querySelector:'.mermaid'});\"></script>"
 )
 

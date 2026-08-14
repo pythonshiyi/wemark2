@@ -15,6 +15,7 @@ from core.renderer import (
     get_template_names,
     strip_max_width,
     _fix_local_image_paths,
+    MERMAID_SCRIPT,
 )
 
 
@@ -174,6 +175,65 @@ class TestHelpers:
         assert soup.find("meta") is None
         assert soup.find("title") is None
         assert soup.find("p") is not None
+
+    def test_sanitize_removes_script(self):
+        soup = BeautifulSoup("<p>a</p><script>alert(1)</script>", "html.parser")
+        soup = _sanitize(soup)
+        assert soup.find("script") is None
+        assert soup.find("p") is not None
+
+    def test_sanitize_removes_active_tags(self):
+        soup = BeautifulSoup(
+            "<iframe src='https://evil.example'></iframe>"
+            "<object data='x'></object><embed src='y'>"
+            "<style>body{display:none}</style><form action='x'></form>",
+            "html.parser",
+        )
+        soup = _sanitize(soup)
+        for name in ("iframe", "object", "embed", "style", "form"):
+            assert soup.find(name) is None, name
+
+    def test_sanitize_removes_event_attributes(self):
+        soup = BeautifulSoup(
+            "<img src='a.png' onerror='alert(1)' onclick='x()' style='color:red'>",
+            "html.parser",
+        )
+        soup = _sanitize(soup)
+        img = soup.find("img")
+        assert "onerror" not in img.attrs
+        assert "onclick" not in img.attrs
+        assert img.get("style") == "color:red"  # 合法属性保留
+
+    def test_sanitize_removes_javascript_urls(self):
+        soup = BeautifulSoup(
+            "<a href='javascript:alert(1)'>x</a><img src='vbscript:msgbox(1)'>",
+            "html.parser",
+        )
+        soup = _sanitize(soup)
+        assert "href" not in soup.find("a").attrs
+        assert "src" not in soup.find("img").attrs
+
+    def test_render_html_strips_script_and_events(self):
+        html = render_html(
+            "hello\n\n<script>alert(1)</script>\n\n<img src='x.png' onerror='alert(2)'>"
+        )
+        assert "<script>" not in html
+        assert "onerror" not in html
+        assert "hello" in html
+
+    def test_render_html_blocks_javascript_link(self):
+        # markdown-it 默认 validateLink 拒绝 javascript:，退化为纯文本（不生成链接）
+        html = render_html("[点我](javascript:alert(1))")
+        assert "<a" not in html
+        assert 'href="javascript:' not in html
+        # 原始 HTML 直写危险 URL 时由 sanitize 兜底
+        html2 = render_html("<a href='javascript:alert(1)'>x</a>")
+        assert 'href="javascript:' not in html2
+        assert "x" in html2
+
+    def test_mermaid_uses_strict_security(self):
+        assert "securityLevel:'loose'" not in MERMAID_SCRIPT
+        assert "securityLevel:'strict'" in MERMAID_SCRIPT
 
     def test_convert_mermaid_blocks(self):
         soup = BeautifulSoup(
