@@ -1,0 +1,8 @@
+pytest>=8.0.0
+pytest-qt>=4.2.0
+pytest-mock>=3.12.0
+# Project runtime dependencies (already in requirements.txt)
+beautifulsoup4>=4.12.0
+markdown-it-py>=3.0.0
+mdit-py-plugins>=0.4.0
+PySide6>=6.6.0
