@@ -81,7 +81,7 @@ class ConfigManager:
                 with open(path, "r", encoding="utf-8") as f:
                     user = json.load(f)
                 return _deep_merge(DEFAULT_CONFIG, user)
-            except (json.JSONDecodeError, Exception) as e:
+            except Exception as e:
                 logger.error(f"Failed to load config: {e}")
         return copy.deepcopy(DEFAULT_CONFIG)
 

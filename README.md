@@ -91,7 +91,7 @@ pip install -r tests/requirements-test.txt
 pytest
 ```
 
-15 个测试模块覆盖：AI 客户端、渲染器、剪贴板、配置、会话管理、编辑器、大纲、模板选择、i18n、Markdown 高亮等。
+13 个测试模块覆盖：AI 客户端、渲染器、剪贴板、配置、会话管理、编辑器、大纲、模板选择、i18n、Markdown 高亮等（359 个用例）。
 
 ---
 
@@ -147,7 +147,7 @@ pip install -r tests/requirements-test.txt
 pytest
 ```
 
-15 test modules cover the AI client, renderer, clipboard, config, conversation manager, editor, outline, template selector, i18n, and Markdown highlighting.
+13 test modules cover the AI client, renderer, clipboard, config, conversation manager, editor, outline, template selector, i18n, and Markdown highlighting (359 test cases).
 
 ---
 
