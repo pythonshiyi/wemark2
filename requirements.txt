@@ -5,4 +5,5 @@ mdit-py-plugins>=0.4.0
 openai>=2.0.0
 pyperclip>=1.8.0
 PySide6>=6.6.0
-PySide6-QtWebEngine>=6.6.0
+# QtWebEngine 自 PySide6 6.7 起并入 PySide6-Addons（PyPI 上 PySide6-QtWebEngine 已停止发布）
+PySide6-Addons>=6.6.0
