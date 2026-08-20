@@ -1,5 +1,6 @@
 import json
 import re
+import threading
 import urllib.parse
 from functools import lru_cache
 from pathlib import Path
@@ -8,8 +9,18 @@ from bs4 import BeautifulSoup
 from markdown_it import MarkdownIt
 from mdit_py_plugins.dollarmath import dollarmath_plugin
 
-_md = MarkdownIt("default", {"html": True, "linkify": False, "typographer": True, "breaks": True})
-_md.use(dollarmath_plugin)
+_MD_OPTIONS = {"html": True, "linkify": False, "typographer": True, "breaks": True}
+
+_local = threading.local()
+
+
+def _get_md() -> MarkdownIt:
+    md = getattr(_local, "md", None)
+    if md is None:
+        md = MarkdownIt("default", _MD_OPTIONS)
+        md.use(dollarmath_plugin)
+        _local.md = md
+    return md
 
 # 需要移除的标签：文档元数据 + 活跃内容（脚本/插件/表单/CSS 注入，防 XSS）
 REMOVE_TAGS = {
@@ -215,7 +226,7 @@ def _add_heading_ids(dom: BeautifulSoup) -> BeautifulSoup:
 
 def render_html(markdown_text: str, template_name: str = "default") -> str:
     markdown_text = _expand_toc(markdown_text)
-    html = _md.render(markdown_text)
+    html = _get_md().render(markdown_text)
     dom = BeautifulSoup(html, "html.parser")
     dom = _sanitize(dom)
     dom = _add_heading_ids(dom)

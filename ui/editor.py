@@ -1,5 +1,6 @@
 import re
 import shutil
+import warnings
 from datetime import datetime
 from pathlib import Path
 
@@ -18,7 +19,7 @@ from PySide6.QtGui import (
     QPixmap,
     QFontMetrics,
 )
-from PySide6.QtWidgets import QTextEdit, QMenu, QFileDialog, QWidget
+from PySide6.QtWidgets import QTextEdit, QMenu, QFileDialog, QWidget, QApplication
 
 from core.config import config_manager as _cfg
 from core.i18n import tr
@@ -119,7 +120,9 @@ class Editor(QTextEdit):
 
     def set_on_change_callback(self, cb):
         try:
-            self._change_timer.timeout.disconnect()
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                self._change_timer.timeout.disconnect()
         except (TypeError, RuntimeError):
             pass
         self._change_timer.timeout.connect(cb)
@@ -261,8 +264,31 @@ class Editor(QTextEdit):
             pixmap.save(str(dest), "PNG")
         else:
             shutil.copy2(filepath, dest)
+
+        from core import image_hosting
+        from core.i18n import tr
+        src = str(dest)
+        if image_hosting.is_enabled():
+            should_upload = bool(_cfg.get("image_host.auto_upload_on_insert", False))
+            if not should_upload:
+                from PySide6.QtWidgets import QMessageBox
+                reply = QMessageBox.question(
+                    self, tr("image_host_ask_title"), tr("image_host_ask_msg"),
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                should_upload = reply == QMessageBox.Yes
+            if should_upload:
+                from PySide6.QtGui import QCursor
+                QApplication.setOverrideCursor(QCursor(Qt.WaitCursor))
+                try:
+                    src = image_hosting.upload_with_cache(str(dest))
+                except Exception as e:
+                    QMessageBox.warning(self, tr("error_title"),
+                                        tr("image_host_upload_failed", error=str(e)))
+                finally:
+                    QApplication.restoreOverrideCursor()
+
         cursor = self.textCursor()
-        cursor.insertText(f"![]({dest})\n")
+        cursor.insertText(f"![]({src})\n")
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():

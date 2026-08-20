@@ -19,7 +19,8 @@ from core.theme import DARK_STYLE, LIGHT_STYLE
 from core.ai_client import ai_client
 
 from ui.editor import Editor
-from ui.preview import Preview
+from ui.preview import Preview, PreviewRenderWorker
+from ui.upload_worker import ImageUploadWorker
 from ui.tab_manager import TabManager
 from ui.ai_panel import AIPanel
 from ui.outline_panel import OutlinePanel
@@ -40,6 +41,10 @@ class MainWindow(QMainWindow):
         self._preview_timer.setSingleShot(True)
         self._preview_timer.setInterval(200)
         self._preview_timer.timeout.connect(self._render_preview)
+        self._preview_worker = None
+        self._preview_pending = False
+        self._preview_gen = 0
+        self._upload_workers = []
 
         self._init_ui()
         self._init_menu()
@@ -502,8 +507,28 @@ class MainWindow(QMainWindow):
 
     def _render_preview(self):
         editor = self._editor
-        if editor and self._preview_dock.isVisible():
-            self._preview.render(editor.get_markdown(), self._template_selector.current_template())
+        if not editor or not self._preview_dock.isVisible():
+            return
+        if self._preview_worker and self._preview_worker.isRunning():
+            self._preview_pending = True
+            return
+        self._preview_pending = False
+        self._preview_gen += 1
+        worker = PreviewRenderWorker(
+            editor.get_markdown(),
+            self._template_selector.current_template(),
+            self._preview_gen,
+        )
+        worker.rendered.connect(self._on_preview_rendered)
+        self._preview_worker = worker
+        worker.start()
+
+    def _on_preview_rendered(self, gen: int, html: str):
+        if gen != self._preview_gen:
+            return
+        self._preview.display_html(html)
+        if self._preview_pending:
+            self._preview_timer.start()
 
     def _update_counts(self):
         editor = self._editor
@@ -519,11 +544,19 @@ class MainWindow(QMainWindow):
         lines = text.count("\n") + 1
 
         read_time = max(1, round(total_chars / 300)) if total_chars > 0 else 1
-        self._word_label.setText(
-            tr("status_word_count",
+        label_text = tr("status_word_count",
                chinese=chinese_chars, english=english_words,
                para=paragraphs, lines=lines,
-               read_time=read_time))
+               read_time=read_time)
+        if total_chars >= 15000:
+            label_text += tr("status_word_count_warn")
+        color = "#888"
+        if total_chars >= 19000:
+            color = "#e53935"
+        elif total_chars >= 15000:
+            color = "#e67e22"
+        self._word_label.setStyleSheet(f"color:{color};font-size:11px;padding:0 8px;")
+        self._word_label.setText(label_text)
 
     def _update_cursor_pos(self, line: int, total: int):
         self._cursor_label.setText(tr("status_cursor_pos", line=line, total=total))
@@ -774,8 +807,38 @@ class MainWindow(QMainWindow):
         html = render_full_page(md, tmpl)
         tab = self._tab_manager.get_current_tab()
         base = os.path.dirname(tab.file_path) if tab and tab.file_path else None
+
+        from core import image_hosting
+        if image_hosting.is_enabled() and config_manager.get("image_host.auto_upload_on_export", True):
+            self._upload_and_copy_wechat(html, base)
+            return
+
         copy_rich_text(html, base)
         self._status_bar.showMessage(tr("status_copied_wechat"), 3000)
+
+    def _upload_and_copy_wechat(self, html: str, base: str):
+        self._status_bar.showMessage(tr("status_image_uploading"), 5000)
+        self.show_progress(True)
+        self.set_progress_text(tr("status_image_uploading"))
+        worker = ImageUploadWorker(html, base)
+        worker.done.connect(lambda new_html, count: self._on_upload_done(new_html, count))
+        worker.error.connect(lambda err: self._on_upload_error(err))
+        self._upload_workers.append(worker)
+        worker.start()
+
+    def _on_upload_done(self, html: str, count: int):
+        self.show_progress(False)
+        self._upload_workers.clear()
+        copy_rich_text(html, None)
+        if count > 0:
+            self._status_bar.showMessage(tr("status_images_uploaded", count=count), 5000)
+        else:
+            self._status_bar.showMessage(tr("status_copied_wechat"), 3000)
+
+    def _on_upload_error(self, err: str):
+        self.show_progress(False)
+        self._upload_workers.clear()
+        self._status_bar.showMessage(tr("image_host_upload_failed", error=err), 5000)
 
     def _copy_preview_image(self):
         """复制预览内容为高清长图（QTextDocument 原生渲染）。"""
@@ -968,15 +1031,20 @@ class MainWindow(QMainWindow):
                 event.ignore()
                 return
 
-        config_manager.set("window.width", self.width())
-        config_manager.set("window.height", self.height())
-        config_manager.set("window.x", self.x())
-        config_manager.set("window.y", self.y())
+        updates = {
+            "window": {
+                "width": self.width(),
+                "height": self.height(),
+                "x": self.x(),
+                "y": self.y(),
+            },
+            "template": {"last_used": self._template_selector.current_template()},
+            "outline_visible": self._outline_dock.isVisible(),
+        }
         if self._ai_dock.isVisible():
-            config_manager.set("window.ai_dock_width", self._ai_dock.width())
-            config_manager.set("window.ai_dock_area", self._area_to_str(self.dockWidgetArea(self._ai_dock)))
+            updates["window"]["ai_dock_width"] = self._ai_dock.width()
+            updates["window"]["ai_dock_area"] = self._area_to_str(self.dockWidgetArea(self._ai_dock))
         if self._preview_dock.isVisible():
-            config_manager.set("window.preview_dock_width", self._preview_dock.width())
-        config_manager.set("template.last_used", self._template_selector.current_template())
-        config_manager.set("outline_visible", self._outline_dock.isVisible())
+            updates["window"]["preview_dock_width"] = self._preview_dock.width()
+        config_manager.update(updates)
         event.accept()

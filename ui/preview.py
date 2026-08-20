@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import QUrl, Signal, QObject
+from PySide6.QtCore import QUrl, Signal, QObject, QThread
 from PySide6.QtGui import QPixmap, QPainter, QColor, QTextDocument
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QApplication
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -8,7 +8,25 @@ from PySide6.QtWebEngineCore import QWebEngineSettings
 from PySide6.QtWebChannel import QWebChannel
 
 from core.config import config_manager as _cfg
+from core.logger import get_logger
 from core.renderer import render_html, render_full_page, strip_max_width, _fix_local_image_paths
+
+
+class PreviewRenderWorker(QThread):
+    rendered = Signal(int, str)
+
+    def __init__(self, markdown: str, template: str, gen: int, parent=None):
+        super().__init__(parent)
+        self._markdown = markdown
+        self._template = template
+        self._gen = gen
+
+    def run(self):
+        try:
+            html = render_full_page(self._markdown, self._template)
+            self.rendered.emit(self._gen, html)
+        except Exception as e:
+            get_logger("preview").error(f"Preview render failed: {e}", exc_info=True)
 
 
 class _ScrollBridge(QObject):
@@ -59,28 +77,34 @@ class Preview(QWidget):
 
     def _full_page_html(self, markdown: str) -> str:
         html = render_full_page(markdown, self._current_template)
-        if _cfg.get("theme", "light") == "dark":
-            dark_css = (
-                "<style>"
-                "body{background:#1e1e2e;color:#cdd6f4 !important;}"
-                "h1,h2,h3,h4,h5,h6{color:#89b4fa !important;}"
-                "a{color:#89b4fa !important;}"
-                "code,pre{background:#313244 !important;color:#cdd6f4 !important;}"
-                "blockquote{background:#2a2a3c !important;border-left-color:#89b4fa !important;}"
-                "table tr{background:#1e1e2e !important;}"
-                "table tr:nth-child(even){background:#2a2a3c !important;}"
-                "table td,table th{border-color:#45475a !important;}"
-                ".mermaid{background:#2a2a3c !important;}"
-                "img{opacity:0.9;}"
-                "</style>"
-            )
-            html = html.replace("</head>", dark_css + "</head>", 1)
-        return html
+        return self._apply_theme_css(html)
+
+    def _apply_theme_css(self, html: str) -> str:
+        if _cfg.get("theme", "light") != "dark":
+            return html
+        dark_css = (
+            "<style>"
+            "body{background:#1e1e2e;color:#cdd6f4 !important;}"
+            "h1,h2,h3,h4,h5,h6{color:#89b4fa !important;}"
+            "a{color:#89b4fa !important;}"
+            "code,pre{background:#313244 !important;color:#cdd6f4 !important;}"
+            "blockquote{background:#2a2a3c !important;border-left-color:#89b4fa !important;}"
+            "table tr{background:#1e1e2e !important;}"
+            "table tr:nth-child(even){background:#2a2a3c !important;}"
+            "table td,table th{border-color:#45475a !important;}"
+            ".mermaid{background:#2a2a3c !important;}"
+            "img{opacity:0.9;}"
+            "</style>"
+        )
+        return html.replace("</head>", dark_css + "</head>", 1)
 
     def render(self, markdown: str, template_name: str = None):
         if template_name is not None:
             self._current_template = template_name
-        html = self._full_page_html(markdown)
+        self.display_html(self._full_page_html(markdown))
+
+    def display_html(self, html: str):
+        html = self._apply_theme_css(html)
         home = Path.home()
         base_url = QUrl.fromLocalFile(str(home / ".wemark2"))
         self._webview.setHtml(html, base_url)

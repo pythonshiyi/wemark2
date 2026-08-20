@@ -4,10 +4,13 @@ from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton,
     QLabel, QProgressBar, QFileDialog, QMessageBox, QApplication,
+    QCheckBox,
 )
 
+from core.config import config_manager
 from core.i18n import tr
 from core.renderer import render_full_page, render_html, _load_template, strip_max_width, _fix_local_image_paths
+from ui.upload_worker import ImageUploadWorker
 
 
 class ExportDialog(QDialog):
@@ -26,12 +29,20 @@ class ExportDialog(QDialog):
         self._base_path = base_path
         self._html = render_html(markdown, template)
         self._exporting = False
+        self._upload_workers = []
 
         layout = QVBoxLayout(self)
         layout.setSpacing(8)
         layout.setContentsMargins(20, 16, 20, 16)
 
         layout.addWidget(QLabel(tr("export_select"), styleSheet="font-weight:bold;color:#555;font-size:13px;"))
+
+        from core import image_hosting
+        self._upload_cb = QCheckBox(tr("export_upload_images"))
+        self._upload_cb.setChecked(image_hosting.is_enabled() and config_manager.get("image_host.auto_upload_on_export", True))
+        self._upload_cb.setEnabled(image_hosting.is_enabled())
+        self._upload_cb.setStyleSheet("QCheckBox{font-size:12px;color:#666;}")
+        layout.addWidget(self._upload_cb)
 
         btn_style = "QPushButton{background:#f8f9fa;border:1px solid #e0e0e0;}"
         btn_style += "QPushButton:hover{background:#e8f0fe;border-color:#1a73e8;}"
@@ -175,10 +186,50 @@ class ExportDialog(QDialog):
     def _copy_wechat(self):
         from core.clipboard import copy_rich_text
         full_html = render_full_page(self._markdown, self._template)
-        copy_rich_text(full_html, self._base_path)
+        if self._upload_cb.isChecked():
+            self._start_upload(full_html, self._finish_copy_wechat)
+        else:
+            self._finish_copy_wechat(full_html)
+
+    def _finish_copy_wechat(self, html: str):
+        from core.clipboard import copy_rich_text
+        copy_rich_text(html, self._base_path)
         QMessageBox.information(self, tr("copy_done"), tr("copy_wechat_done"))
 
     def _copy_html(self):
         import pyperclip
-        pyperclip.copy(self._html)
+        if self._upload_cb.isChecked():
+            self._start_upload(self._html, self._finish_copy_html)
+        else:
+            self._finish_copy_html(self._html)
+
+    def _finish_copy_html(self, html: str):
+        import pyperclip
+        pyperclip.copy(html)
         QMessageBox.information(self, tr("copy_done"), tr("copy_html_done"))
+
+    def _start_upload(self, html: str, on_done):
+        self._exporting = True
+        self._progress.setVisible(True)
+        self._progress.setRange(0, 0)
+        self.setEnabled(False)
+        QApplication.processEvents()
+        worker = ImageUploadWorker(html, self._base_path)
+        worker.done.connect(lambda new_html, count: self._on_upload_done(new_html, on_done))
+        worker.error.connect(lambda err: self._on_upload_error(err))
+        self._upload_workers.append(worker)
+        worker.start()
+
+    def _on_upload_done(self, html: str, on_done):
+        self._upload_workers.clear()
+        self._progress.setVisible(False)
+        self.setEnabled(True)
+        self._exporting = False
+        on_done(html)
+
+    def _on_upload_error(self, err: str):
+        self._upload_workers.clear()
+        self._progress.setVisible(False)
+        self.setEnabled(True)
+        self._exporting = False
+        QMessageBox.warning(self, tr("error_title"), tr("image_host_upload_failed", error=err))

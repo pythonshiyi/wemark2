@@ -23,6 +23,7 @@ class SettingsDialog(QDialog):
         tabs = QTabWidget()
         tabs.addTab(self._create_ai_tab(), tr("settings_tab_ai"))
         tabs.addTab(self._create_editor_tab(), tr("settings_tab_editor"))
+        tabs.addTab(self._create_image_host_tab(), tr("settings_tab_image_host"))
         tabs.addTab(self._create_typewriter_tab(), tr("settings_tab_typewriter"))
         tabs.addTab(self._create_template_tab(), tr("settings_tab_template"))
         tabs.addTab(self._create_general_tab(), tr("settings_tab_general"))
@@ -198,6 +199,48 @@ class SettingsDialog(QDialog):
 
         return w
 
+    # ── 图床 ──
+
+    def _create_image_host_tab(self):
+        w = QWidget()
+        layout = QFormLayout(w)
+
+        group = QGroupBox(tr("settings_group_image_host"))
+        gl = QFormLayout(group)
+
+        self._ih_uploader = QComboBox()
+        self._ih_uploader.addItem(tr("settings_uploader_none"), "none")
+        self._ih_uploader.addItem(tr("settings_uploader_catbox"), "catbox")
+        self._ih_uploader.addItem(tr("settings_uploader_custom"), "custom")
+        gl.addRow(tr("settings_image_uploader"), self._ih_uploader)
+
+        self._ih_custom_url = QLineEdit()
+        self._ih_custom_url.setPlaceholderText("https://your-host.com/upload")
+        gl.addRow(tr("settings_custom_url"), self._ih_custom_url)
+
+        self._ih_custom_field = QLineEdit("file")
+        gl.addRow(tr("settings_custom_field"), self._ih_custom_field)
+
+        self._ih_auto_insert = QCheckBox(tr("settings_auto_upload_insert"))
+        gl.addRow("", self._ih_auto_insert)
+
+        self._ih_auto_export = QCheckBox(tr("settings_auto_upload_export"))
+        gl.addRow("", self._ih_auto_export)
+
+        hint = QLabel(tr("settings_image_host_hint"))
+        hint.setStyleSheet("color:#888;font-size:11px;")
+        hint.setWordWrap(True)
+        gl.addRow(hint)
+        layout.addRow(group)
+
+        self._ih_uploader.currentIndexChanged.connect(self._on_uploader_changed)
+        return w
+
+    def _on_uploader_changed(self, index: int):
+        is_custom = self._ih_uploader.itemData(index) == "custom"
+        self._ih_custom_url.setEnabled(is_custom)
+        self._ih_custom_field.setEnabled(is_custom)
+
     # ── 打字机 ──
 
     def _create_typewriter_tab(self):
@@ -351,6 +394,16 @@ class SettingsDialog(QDialog):
 
         self._outline_default.setChecked(c.get("outline_visible", False))
 
+        uploader = c.get("image_host.uploader", "none")
+        uidx = self._ih_uploader.findData(uploader)
+        if uidx >= 0:
+            self._ih_uploader.setCurrentIndex(uidx)
+        self._ih_custom_url.setText(c.get("image_host.custom_url", ""))
+        self._ih_custom_field.setText(c.get("image_host.custom_field", "file"))
+        self._ih_auto_insert.setChecked(c.get("image_host.auto_upload_on_insert", False))
+        self._ih_auto_export.setChecked(c.get("image_host.auto_upload_on_export", True))
+        self._on_uploader_changed(self._ih_uploader.currentIndex())
+
     def _save(self):
         c = config_manager
         c.set("ai.api_key", self._ai_key.text())
@@ -386,6 +439,12 @@ class SettingsDialog(QDialog):
         c.set("language", self._language.currentData())
         c.set("theme", self._theme.currentData())
         c.set("outline_visible", self._outline_default.isChecked())
+
+        c.set("image_host.uploader", self._ih_uploader.currentData())
+        c.set("image_host.custom_url", self._ih_custom_url.text())
+        c.set("image_host.custom_field", self._ih_custom_field.text())
+        c.set("image_host.auto_upload_on_insert", self._ih_auto_insert.isChecked())
+        c.set("image_host.auto_upload_on_export", self._ih_auto_export.isChecked())
         set_language(self._language.currentData())
 
         ai_client.reload()
@@ -403,7 +462,7 @@ class SettingsDialog(QDialog):
 
         from openai import OpenAI
         try:
-            client = OpenAI(api_key=api_key, base_url=base_url)
+            client = OpenAI(api_key=api_key, base_url=base_url, timeout=15.0)
             model = self._ai_model.currentText() or "deepseek-v4-flash"
             thinking = self._ai_thinking.isChecked()
             kwargs = dict(

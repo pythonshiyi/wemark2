@@ -54,7 +54,7 @@ class AIClient:
         self._max_tokens = cfg.get("max_tokens", 4096)
 
         if api_key:
-            self._client = OpenAI(api_key=api_key, base_url=base_url)
+            self._client = OpenAI(api_key=api_key, base_url=base_url, timeout=60.0)
         else:
             self._client = None
 

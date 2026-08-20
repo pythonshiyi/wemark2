@@ -50,6 +50,13 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     "theme": "light",
     "recent_files": [],
     "outline_visible": False,
+    "image_host": {
+        "uploader": "none",
+        "custom_url": "",
+        "custom_field": "file",
+        "auto_upload_on_insert": False,
+        "auto_upload_on_export": True,
+    },
 }
 
 

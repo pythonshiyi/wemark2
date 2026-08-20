@@ -343,6 +343,7 @@ class AIPanel(QWidget):
         super().__init__(parent)
         self._context_getter = None
         self._worker = None
+        self._retired_workers: list = []
         self._pending_bubble = None
         self._pending_content = ""
         self._pending_reasoning = ""
@@ -1648,7 +1649,19 @@ class AIPanel(QWidget):
         if self._worker and self._worker.isRunning():
             self._worker.stop()
             self._worker.quit()
-            self._worker.wait(1000)
+            if not self._worker.wait(200):
+                for sig in (
+                    self._worker.chunk_received,
+                    self._worker.reasoning_chunk,
+                    self._worker.usage_received,
+                    self._worker.finished,
+                    self._worker.error_occurred,
+                ):
+                    try:
+                        sig.disconnect()
+                    except (TypeError, RuntimeError):
+                        pass
+                self._retired_workers.append(self._worker)
         self._send_btn.setVisible(True)
         self._stop_btn.setVisible(False)
         self._input.setEnabled(True)
